@@ -9,4 +9,4 @@
 ###### Task 4 plots the results of Task 3.3
   
 #### Part 2
-###### Part implements a small regression and plots the results. NOTE: This task is not finished yet.
+###### Part 2 implements a small regression and plots the results. NOTE: This task is not finished yet.
