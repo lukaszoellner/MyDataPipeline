@@ -1,0 +1,827 @@
+---
+title: 'Campaign Finance: Research Report'
+author:
+- d'Overschie de Neeryssche, Esther
+- Pitsch, Francesca
+- Tragl, Maximilian
+date: "26/04/2019"
+output:
+  pdf_document: default
+  html_document: default
+subtitle: 'Big Data Statistics for R and Python: Group Examination of Part I'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Part I: Step-by-step implementation (15 points)
+
+## Install and load all required packages in this section
+```{r, echo=FALSE}
+# install.packages(c("rvest", "doSNOW", "RSQLite", "here", "DBI", "ff", "ffbase", "pryr", "data.table"))
+library(knitr)
+library(rvest)
+library(doSNOW)
+library(RSQLite)
+library(here)
+library(DBI)
+library(ff)
+library(ffbase)
+library(pryr)
+library(data.table)
+library(ggplot2)
+library(ggthemes)
+library(tidyverse)
+library(stringr)
+library(reshape)  
+
+```
+
+# Automatically set working directory to top folder of project. Do not add your own working directory path
+```{r}
+setwd(here())
+getwd()
+```
+
+
+## Task 1: Data gathering
+
+### Solution
+
+```{r, echo=TRUE, include=FALSE}
+# Install packages if needed
+library(knitr)
+library(data.table)
+library(rvest)
+library(httr)
+library(utils)
+library(here)
+
+# Define basic variables. Names are self-explaining
+RAW_URL <- "http://datacommons.s3.amazonaws.com/subsets/td-20140324/contributions.fec.1990.csv.zip"
+BASE_URL <- gsub("1990.csv.zip", "", RAW_URL)
+OUTPUT_FILE <- "./data/fec.csv"
+START_DATE <- 1990
+END_DATE <- 2014
+
+# Build URLS and file paths ==================================================================================
+
+# Generate vector containing all resepective years to append to BASE_URL
+years <- seq(START_DATE, END_DATE, 2)
+
+# Build final vector of URLs and filepaths
+urls <- paste0(BASE_URL, years, ".csv.zip")
+
+# Download each file and store in one large csv file =========================================================
+
+# We could wrap the Sys.time() function around the loop. This way is due to personal preference
+start_time <- Sys.time()
+
+for (url in urls){
+  
+  # Create temporary file
+  tmpfile <- tempfile()
+  
+  # Save data and store in temporary file
+  download.file(url, destfile = tmpfile)
+  
+  # Unzip data
+  tmpfile <- unzip(tmpfile)
+  
+  # Parse data using the fread funtion from the data.table package
+  mydata <- fread(tmpfile[1])
+  
+  # Write parsed file into csv file. Following data will be added thanks to append = TRUE
+  fwrite(mydata, file =  OUTPUT_FILE, append = TRUE)
+  unlink(tmpfile)
+  gc()
+  
+}
+
+# Measure time for downloading, parsing and adding data to fec.csv file
+end_time <- Sys.time()
+time_elapsed <- end_time - start_time
+print(paste0("Time taken for downloading, parsing and appending the data: ", round(time_elapsed, 2), " minutes"))
+
+# Zip .csv file
+zip("./data/fec.csv.zip", files = "./data/fec.csv")
+
+# Inform that Part I Task I is completed
+rm(list = ls())
+print("Part I Task 1 completed")
+
+
+```
+
+### Exposition of the solution
+
+
+#### Which approach did you take to import CSVs and how does it basically work?
+  
+We individually downloaded thirteen zipped files from the given website, unzipped them and used the fread() function from the data.table package to write them
+in a csv.file. We called this csv file "fec.csv" and stored on our computers in the "data" folder within our cloned course repository.
+First, we created individual URLs by replacing the year in the Base URL. Then we used the download.file() function to download the zipped file and stored it in
+a freshly generated temporary file. We unzipped this temporary file and assigned it to itself. The entire data (up to several hundreds MB) were in the RAM at this
+point. Then we used the fread() function from the data.table package to write this data into a .csv file.
+
+
+#### Why might it make sense to download the entire data set as individual parts (batches) instead of downloading the one large zip-file containing all data?
+  
+For this task we applied a split-combine strategy. The required data for this assignment may be downloaded as a single zip file with 1.57 GB or as 13 individual zip files containing the respective cycles such as
+1989 - 1990, ..., 2013 - 2014. The final fec.csv file created in Part I Task 1 has a size of approx. 8GB. This corresponds to the size of the unzipped 1.57GB file.
+Temporarily storing it in the RAM is not doable for most computers. Thus, some files are just too large to store in the RAM and we need to implement other
+strategies.
+The size of the single zip files sizes range somewhere between 31MB and 250 MB. After having downloaded each file we unzip it, parse it and write it to an existing csv file.
+In order to write the data of each unzipped file in a csv file with the fread() function we need to temporarily load it in the RAM so R can work with the data.
+Nowadays, ordinary RAMs range somewhere between 4GB and 16GB for very good computers which are available in ordinary shops such as MediaMarkt oder Saturn.
+Therefore, an 8GB file is not managable by a 4GB or 8GB and RAM for instance (and is is doubtable whether a 12GB RAM could work with the data).
+Further, not the entire RAM is reserved for computations. Rather other applications such as Browsers, Mail accounts etc. must be managed, as well.
+However, once the file is unzipped, it becomes even bigger, since this is the purpose of zipping it.
+Therfore, we need to download the data in handy parts which are managable by our RAM.
+
+
+#### What is the purpose of unzipping and zipping/compressing the data in this context?
+
+The purpose of zipping a file is to make it smaller in size. The fec.csv file we created in Part I Task 1 has a size of approx. 8GB.
+Zipping it shrinks its size depending on the shrinking factor (Most software packages offer a compressing factor between 1 and 9, while 9 compresses
+he data the most. Therefore, it also takes longer to compress the data). The entire zipped file may obviously be compress to 1.57GB which corresponds to roughly
+20% of its uncompressed size. This becomes very handy once datasets become really large (for instance 100GB).
+
+
+
+## Task 2: Data storage and databases
+
+### Solution
+```{r, echo=TRUE, include=FALSE}
+# PREPARATION ================================================================================================
+
+# Install packages. Uncomment commands if needed
+
+#install.packages("data.table")
+#install.packages("rvest")
+#install.packages("httr")
+#install.packages("utils")
+#install.packages("here")
+#install.packages("RSQLite")
+#install.packages("DBI")
+#install.packages("ff")
+#install.packages("ffbase")
+#install.packages("pryr")
+
+
+# Drop all existing variables
+rm(list = ls())
+
+# Load libraries
+library(data.table)
+library(rvest)
+library(httr)
+library(utils)
+library(here)
+library(RSQLite)
+library(DBI)
+library(ff)
+library(ffbase)
+library(pryr)
+library(knitr)
+# Dynamically set working directory to top folder of project. Do not paste your own wd in here
+setwd(here())
+getwd()
+
+# ============================================================================================================
+
+
+
+# Create Database and Table "donations" ======================================================================
+data_path <- "./data/fec.csv"
+# Create Database fecsqlite. It will contain all three tables
+fecsqlite <- dbConnect(SQLite(), "./data/fec.sqlite")
+
+# Count rows of fec.csv, define batch size and calculate number of batches
+start_time2 <- Sys.time()
+nrows <-  length(count.fields("./data/fec.csv"))
+end_time2 <- Sys.time()
+time_elapsed2 <- end_time2 - start_time2
+print(paste0("Time taken for counting the rows in .csv file: ", round(time_elapsed2, 2), " minutes"))
+max_batchsize <- 600000
+batches <- round(nrows/max_batchsize)
+
+# Define field.types of donations, CHECK: date, 
+donations_dtyps <- c(id="INTEGER", import_reference_id="INTEGER", cycle="INTEGER", transaction_namespace="TEXT", transaction_id="TEXT"
+                     ,transaction_type="TEXT",filing_id="INTEGER",is_amendment="TEXT",amount="REAL",date="TEXT",contributor_name="TEXT"
+                     ,contributor_ext_id="TEXT",contributor_type="TEXT",contributor_occupation="TEXT",contributor_employer="TEXT"
+                     ,contributor_gender="TEXT",contributor_address="TEXT",contributor_city="TEXT",contributor_state="TEXT"
+                     ,contributor_zipcode="INTEGER",contributor_category="TEXT",organization_name="TEXT",organization_ext_id="TEXT"
+                     ,parent_organization_name="TEXT",parent_organization_ext_id="TEXT",recipient_name="TEXT",recipient_ext_id="TEXT"
+                     ,recipient_party="TEXT",recipient_type="TEXT",recipient_state="TEXT",recipient_state_held="TEXT"
+                     ,recipient_category="TEXT",committee_name="TEXT",committee_ext_id="TEXT",committee_party="TEXT",candidacy_status="TEXT"
+                     ,district="TEXT",district_held="TEXT",seat="TEXT",seat_held="TEXT",seat_status="TEXT",seat_result="TEXT")
+
+
+# Load batch with headings and write to database individually before the loop starts
+first_batch <- fread(data_path, nrows = max_batchsize, header = TRUE)
+column_names <- colnames(first_batch)
+dbWriteTable(fecsqlite, "donations", field.types = donations_dtyps, overwrite = TRUE, first_batch)
+rm(first_batch)
+gc()
+
+# Measure time before loop starts
+start_time3 <- Sys.time()
+
+# Start of Loop
+# Load each batch into database
+for (i in 2:batches){
+  
+  # Read rows out of fec.csv according to batch size. Set column names otherwise append will not work
+  skipped = (i-1) * max_batchsize + 1
+  temp_data <- fread(data_path, nrows = max_batchsize, header = FALSE, skip = skipped)
+  names(temp_data) <- column_names
+  
+  # Write content of tempfile in donation table of fec.sqlite database
+  dbWriteTable(fecsqlite, "donations", append = TRUE, header = TRUE, temp_data)
+  print(paste0("Batch written: ", i))
+  
+  #Delete current batch and clean RAM
+  rm(temp_data)
+  gc()
+  
+}
+# End of Loop
+
+# Measure time after loop terminates
+end_time3 <- Sys.time()
+time_elapsed3 <- end_time3 - start_time3
+print(paste0("Time taken for writing database: ", round(time_elapsed3, 2), " minutes"))
+
+# Create indeces in "donations" for specific columns we will need in the following exercises
+dbExecute(fecsqlite, "CREATE INDEX contributor_category ON donations(contributor_category);")
+dbExecute(fecsqlite, "CREATE INDEX transaction_type_donations ON donations(transaction_type);")
+dbExecute(fecsqlite, "CREATE INDEX recipient_name ON donations(recipient_name);")
+dbExecute(fecsqlite, "CREATE INDEX amount ON donations(amount);")
+dbExecute(fecsqlite, "CREATE INDEX seat ON donations(seat);")
+dbExecute(fecsqlite, "CREATE INDEX recipient_type ON donations(recipient_type);")
+dbExecute(fecsqlite, "CREATE INDEX cycle ON donations(cycle);")
+
+# Create "transactiontypes" table ===================================================================================
+
+# Download table from website and store in data frame transactions
+transactions_url <- "https://classic.fec.gov/finance/disclosure/metadata/DataDictionaryTransactionTypeCodes.shtml"
+transactions <- transactions_url %>%
+  html() %>%
+  html_nodes(xpath='//*[@id="fec_mainContent"]/table'[1]) %>%
+  html_table(fill = TRUE)
+transactions <- transactions[[1]]
+
+# Set column names
+colnames(transactions) <- c("Transaction_Types", "Transaction_Types_Description")
+
+# Create table "transactiontypes" and write table to database "fecsqlite"
+dbWriteTable(fecsqlite, "transactiontypes", field.types = c(Transaction_Types ="TEXT",
+                                                             Transaction_Types_Description = "Text"), overwrite = TRUE, transactions)
+
+# Create indeces in "transactiontypes" for specific columns we will need in the following exercises
+dbExecute(fecsqlite, "CREATE INDEX Transaction_Types_Description ON transactiontypes(Transaction_Types_Description);")
+dbExecute(fecsqlite, "CREATE INDEX Transaction_Types ON transactiontypes(Transaction_Types);")
+
+#dbReadTable(fecsqlite, "transactiontypes")
+
+# Create "industrycodes" table ====================================================================================
+
+# Download table from website and store in data frame industrycodes 
+industrycodes <- read.csv("http://assets.transparencydata.org.s3.amazonaws.com/docs/catcodes.csv")
+
+# Define data.types
+industrycodes_dtyps = c(source = "TEXT", code = "TEXT", name = "TEXT", industry = "TEXT", order = "TEXT")
+
+# Create table "industrycodes" and write table to database "fecsqlite"
+dbWriteTable(fecsqlite, "industrycodes", field.types = industrycodes_dtyps, overwrite = TRUE, industrycodes)
+
+# Create indeces in "industrycodes" for specific columns we will need in the following exercises
+dbExecute(fecsqlite, "CREATE INDEX industry ON industrycodes(industry);")
+dbExecute(fecsqlite, "CREATE INDEX code ON industrycodes(code);")
+
+# Show final results ===============================================================================================
+
+# Signal end of computation
+
+# Disconnect with database
+dbDisconnect(fecsqlite)
+
+# Drop all existing variables
+rm(list = ls())
+print("Part I Task 2 completed")
+
+```
+
+
+
+
+### Exposition of the solution
+
+
+#### Explain why it makes sense to keep the three data sets in three different tables.
+
+The tables we created in this assignment are relational databases (RDMBS). This means that the tables are linked by key-variables (unique identifiers).
+In our case, the donations table is linked with the industrycodes table by the two columns donations.contributor_category and industrycodes.code. Further,
+the donations table is linked with the transactiontypes table via donations.transaction_type and transactiontypes.Transaction_Types. The reason why we store
+the data in different tables is to reduce redundancy of data entries. This relational database model is very efficient since less storage is used for the entire
+data. Further, it's often preferable to make sure that a particular column of data is only stored in a single location, so there are fewer places to update
+and less risk of having different data in different places. Therfore we need the unique identifiers.
+Second, we may apply indeces to specific columns. The indices must be saved as well, thus increase the storage needed for the datbase, but they accelerate the
+querying of the database.
+
+#### Explain what you did to optimize the database and (in simple terms) why your optimization improves the database in comparison to the same database without any optimization (all columns as TEXT and no indices).
+
+We set indeces to a few selected columns. Without an index, the SQL Server engine works just like a "reader" who is trying to find a word in a book by
+examining each page individually. This means the the query must scan every row (there are approx. 26 Mio. rows in the donations table) individually.
+By using the index of a specific columns in the back of a book, a reader can complete the task in a much shorter time. In SQL terms, this means that the engine
+does not need to examine every row, but knows which rows to select by checking the index.
+
+
+#### Is it faster? Does it use less storage space? why?
+  
+However, there is a trade-off. The advantage of faster querying the datbase does not come for free. The index needs to be saved as well, and thus increases
+the size of the database. Further, creating the database takes more time, if we want to append indeces to selected columns since they need to be "written" in the
+database. The reward, however, is that querying in the following tasks becomes considerably faster.
+
+
+
+
+
+## Task 3: Data aggregation 
+
+### Solution
+
+```{r, echo=TRUE, include=FALSE}
+# Install packages if needed
+library(knitr)
+library(RSQLite)
+library(DBI)
+library(data.table)
+library(here)
+library(odbc)
+library(httr)
+library(ff)
+library(pryr)
+library(plyr)
+
+# Connect with database
+fec <- dbConnect(SQLite(), dbname= "./data/fec.sqlite")
+
+# Table 1 ====================================================================================================
+
+# Define queries
+# Querie asks for spendings of OIL&GAS industry. Only look at years between 1990 - 2014
+my_query_1 <- "SELECT
+                strftime(\"%Y\", date) as \"year\", SUM(amount)
+              FROM
+                donations
+              JOIN
+                industrycodes ON donations.contributor_category = industrycodes.code
+              JOIN
+                transactiontypes ON donations.transaction_type = transactiontypes.Transaction_Types
+              WHERE
+                industrycodes.industry = \"OIL & GAS\"
+              AND
+                transactiontypes.Transaction_Types_Description =
+                \"Contribution to political committees (other than Super PACs and Hybrid PACs) from an individual, partnership or limited liability company\"
+              AND
+                year BETWEEN \"1988-12-31\" AND \"2014-12-31\"
+              GROUP
+                BY year"
+
+# Querie asks for spendings of ALL industries. Only look at years between 1990 - 2014
+my_query_2 <- "SELECT
+                strftime(\"%Y\", date) as \"year\", SUM(amount)
+              FROM
+                donations
+              JOIN
+                transactiontypes ON donations.transaction_type = transactiontypes.Transaction_Types
+              WHERE
+                transactiontypes.Transaction_Types_Description =
+                \"Contribution to political committees (other than Super PACs and Hybrid PACs) from an individual, partnership or limited liability company\"
+              AND
+                year BETWEEN \"1988-12-31\" AND \"2014-12-31\"
+              GROUP BY
+                year"
+
+
+# Issue queries OIL & GAS (2014 has no entry. Set to 2014 to 0 so that percentages_df has equal length)
+df_oil <- dbGetQuery(fec, my_query_1)
+df_oil <- rbind(df_oil, c(2014, 0))
+
+# Issue queries Total amount spent
+df_total <- dbGetQuery(fec, my_query_2)
+
+# Create Output Table and calculate Percentage values
+df_percentages <- round((100*(df_oil[,2]/df_total[,2])), 2)
+df_combined <- cbind(df_total, df_oil[,2], df_percentages)
+colnames(df_combined) <- c("Year", "TOTAL donations", "O&G Industry donations", "Percentages")
+kable(df_combined)
+rm(my_query_1, my_query_2, df_oil, df_total, df_percentages)
+gc()
+
+# Table 2 ====================================================================================================
+
+my_query_3 <- "SELECT
+            cycle, recipient_name, SUM(amount) as money
+          FROM
+            donations
+          WHERE
+            seat = \"federal:president\"
+          AND
+            recipient_type = \"P\"
+          AND
+            amount >= 0
+          GROUP BY
+            cycle, recipient_name
+          ORDER BY
+            cycle, money DESC"
+
+# Store output in dataframe (since the output is extremely small we can us a data.frame instead of a data.table here)
+df_ranking <- dbGetQuery(fec, my_query_3)
+df_ranking <- df_ranking[,1:2]
+
+# Create a ranking and assign a ranking to each candidate in each year
+df_ranking<- ddply(df_ranking, .(cycle), mutate, rank = seq_along(recipient_name))
+
+# Transform data from long to wide format, slice out the first 5 candidates each year and rename columns
+df_ranking_wide <- reshape(df_ranking, idvar = "rank", timevar = "cycle", direction = "wide")
+df_ranking_wide <- df_ranking_wide[1:5, ]
+colnames_years <- seq(1990, 2014, 2)
+colnames(df_ranking_wide) <- c("Rank", colnames_years) 
+kable(df_ranking_wide)
+rm(my_query_3, df_ranking, colnames_years)
+gc()
+
+# TABLE 3 ====================================================================================================
+
+# Create query (We allow for negative amounts since the Task does not specify something different)
+my_query_4 <- "SELECT
+                strftime(\"%Y\", date) as \"year\",
+              COUNT
+                (CASE WHEN industrycodes.industry = \"BUSINESS ASSOCIATIONS\" THEN amount ELSE NULL END) AS \"BUSINESS ASSOCIATIONS\",
+              COUNT
+                (CASE WHEN industrycodes.industry = \"PUBLIC SECTOR UNIONS\" THEN amount ELSE NULL END) AS \"PUBLIC SECTOR UNIONS\",
+              COUNT
+                (CASE WHEN industrycodes.industry = \"INDUSTRIAL UNIONS\" THEN amount ELSE NULL END) AS \"INDUSTRIAL UNIONS\",
+              COUNT
+                (CASE WHEN industrycodes.industry = \"NON-PROFIT INSTITUTIONS\" THEN amount ELSE NULL END) AS \"NON-PROFIT INSTITUTIONS\",
+              COUNT
+                (CASE WHEN industrycodes.industry = \"RETIRED\" THEN amount ELSE NULL END) AS \"RETIRED\"
+              FROM
+                (donations JOIN industrycodes ON industrycodes.code = donations.contributor_category)
+              WHERE
+                year BETWEEN \"1988-12-31\" AND \"2014-12-31\"
+              AND
+                contributor_type = \"I\"
+              AND
+                amount < 1000
+              GROUP
+                BY year"
+
+
+# Issue query
+df_4 <- dbGetQuery(fec, my_query_4)
+
+# Show data frame and show time
+kable(df_4)
+
+# Write data frame df_4 on hard drive as a .csv for Task 4
+fwrite(df_4, file = "../data/df_Task_4.csv")
+rm(my_query_4)
+# Finish =======================================================================================================
+
+# Disconnect from Database
+dbDisconnect(fec)
+
+# Report
+rm(list = ls())
+gc()
+print("Part I Task 3 completed")
+
+
+
+
+
+
+```
+
+
+### Exposition of the solution
+
+#### Use the exposition of your solution to motivate your approach and explain your considerations regarding efficiency.
+
+In each subpart of Task 3 we queried the data with SQL statements. We used the dbGetQuery function to communicate with the database. The queried data was then
+stored in a dataframe.
+In Task 3.1 we used two queries to retrieve the respective values for the Oil & Gas Industry and for all industried combined. We combined the respective two
+dataframes and calculated the percentage values without using the data.table package, simply because the data.frames were very small (several hundred KBs).
+Querying the database in a smart way puts less pressure on the RAM, while the data.table approach is faster. Since we had to work with machines
+which only had 4GB RAM sometimes, we focused on SQL queries and less on the data.table package.
+In Task 3.2 we again worked with both SQL and a quick data.frame operation. Again, due to the very small size of the data we did not need to use the data.table
+package and its built in functions.
+Task 3.3 was completely done with SQL. The returned table was exactly what was asked for in the respective exercise.
+Since we attached indeces to several columns of our databases we querying did not take much time and we regarded this way as an efficient working model given
+that our RAMs were really small.
+
+## Task 4: Visualization
+
+### Solution
+
+
+```{r set up and read in data, include=FALSE}
+# Install packages if needed
+library(ggplot2)
+library(data.table)
+library(tidyverse)
+library(here())
+library(stringr)
+library(ggthemes)
+library(reshape)  
+library(knitr)
+
+dataf<- fread("./data/df_Task_4.csv")
+dataf 
+
+colnames(dataf) <- colnames(dataf) %>% str_to_lower()
+tdataf<-transform(dataf, retired= round(retired/10,0))
+data.4 = melt(tdataf, id.vars = "year", variable.name = "Industries", value.name = "Contributions")
+
+```
+
+```{r Visualization, echo=FALSE}
+# Install packages if needed
+library(knitr)
+library(ggplot2)
+library(data.table)
+library(tidyverse)
+library(here())
+library(stringr)
+library(ggthemes)
+library(reshape)  
+p<- ggplot(data.4, aes(year, Contributions/1000, group= Industries, colour= Industries))
+p<- p+theme(plot.margin = margin(1,1,1,1,"cm"),
+                        plot.title = element_text(hjust = 0.5),
+                        axis.title.y.right = element_text(color = "#333366"),
+                        panel.grid.minor = element_blank(), 
+                        panel.grid.major = element_line(color = "gray60", size = 0.5),
+                        panel.grid.major.x = element_blank(),
+                        panel.background = element_blank(),
+                        axis.text.y.right = element_text(color =  "#333366"))
+p<- p+ geom_line(size=1.5)
+p<- p+ scale_color_manual(values=c('grey1','gray30','gray50','gray80','#333366'))
+p<- p + scale_y_continuous(breaks = seq(0,40,5), sec.axis = sec_axis(~.*10, name=" (retired) Campaign Contributions [in 1000]"), expand=c(0,0))
+p<- p+ coord_cartesian(xlim=c(1990, 2012), ylim = c(0,42))
+p<- p+ ylab("Campaign Contributions [in 1000]")+xlab("Year") + ggtitle("Number of Campaign Contributions by Individuals")
+p
+```
+
+### Figure notes
+
+Displayed in the figure *Number of Campaign Contributions by Individuals* are the number of small campaign contributions donated by individuals distinguished by five industries. Please notice, that the scale for the industry category *retired* differs from the other four category by the factor 10. This transformation was done in order to guarantee better readability of the graph. An alternative approach would be to take the logarithm of the data. This approach was intendedly neglected in favor of more intuitive interpretation of the numbers of contributions.  
+We make 2 focal observations:  
+Firstly, it is notable that the industry type *retired* is higly volatile with a significant increase in the count of donations every fourth year (corresponding the presidential election cycles).  
+Secondly, over the years and for all industry category the number of individual contributions follows a positive trend. The number of contributions from *retired* in the beginning of the nineties was marginal whereas in 2012 there was a peak number of contributions of around 380'000.
+
+### Exposition of the solution
+
+#### Explain which type of data format would be your choice to store and share this figure (vector-based formats or raster-based formats) and why
+
+Computer graphics can be created as either raster or vector images. Raster graphics are a grid of individual pixels that collectively compose an image.
+Raster graphics are best used for non-line art images. Non-line art images are best represented in raster form because these typically include subtle
+chromatic gradations, undefined lines and shapes, and complex composition. The most obvious advantage of vector images over raster graphics is that
+vector images are quickly and perfectly scalable. There is no upper or lower limit for sizing vector images. Vector graphics are based on
+mathematical formulas that define geometric primitives such as polygons, lines, curves, circles and rectangles. This is why we would propose to use
+vector based graphics and would store it in such a data format.
+
+
+
+# Part II: Data Visualization and Data Analysis (10 points)
+
+## Do incumbents have an advantage over federal house novices in federal house elctions?
+
+### Summary
+In the statistical analysis of Part 2 we examine whether incumbents in federal house elections have an
+advantage in winning the election over non-representative house members. Incumbents are those politicians
+who are applying for an office they currently occupy. For instance, Barack Obama was the incumbent (I) during
+the presidential election 2012 while Mitt Romney was his challenger. More precisely, this means whether
+incumbents are more likely to be elected than those candidates who are currently not a member of the lower chamber.
+Being re-elected may be an indicator of whether voters are satisfied with the current person in office.  
+#### Computational Strategy
+Since we had to deal with a mid-sized dataset we had to apply sophisticated computational techniques in order to treat
+the data in our statistical analysis. We therefore created a sub-csv file from our original fec.csv file and stored it
+in an ffdf object of the ff package. We stored more columns in the ffdf object than we actually needed in our finally analysis in order
+to demonstrate the rationale behind the aforementioned package and objects. We are aware of the fact that we will only
+store those columns in an ffdf object we actually need in further analyses.
+
+#### Empirical Strategy
+
+The variable seat captures six different election types: US Senate, US House of Representatives, US president, upper and lower chamber
+of state legislature and state governor. We decided to solely focus on the US House of Representatives elections. First, the US House of
+Representatives has 435 seats compared to only 100 seats in the US senate and 1 seat for the US president. Thus, this gives us a much bigger
+sample compared to the the other two institutions. Second, US presidents and US senates serve for four respectively six years, while members
+of the US House of Representatives serve for only two years. The higher personal turnover again results in a larger sample. The elections of
+governors and upper and lower chambers of state legislature are much less prominent in the daily political life of US Americans.
+For all these reasons we decided to focus on the US House of Representatives which is coded as federl:house in the seat dummy in the dataset.  
+
+In order to statistically examine whether incumbents have and advantage over new candidates we regress the dependent variable seat_result
+on the independent variable seat_status using a logistic regression. This is necessary because the dependent variable seat_status only takes
+values of 0 and 1 and nothing in between. Thus, it is a binomial variable and we want to calculate the probability that a candidate wins.
+Accordingly, the dummy variable seat_result is coded so that 1 equals "WIN" and 0 equals "Loss".
+The sign in front of the seat_status dummy thus tells us whether incumbents face and advantage or disadvantage over fresh candidates.  
+
+In the figure, we observe an increase of incumbent seats from 1990 till 2014. The reasons for this are manyfold.
+First and foremost, it may mean that voters indeed want to reward politicians in office by re-electing them. However, it could also mean that 
+thanks to an increased usage of media current incumbents are more present to voters than those politicians who are not in office. 
+The table summarizes the results of our logistic regression. The coefficient of seat_status is indeed positive which is in line with our graphical illustration.
+Both the graphical analysis of total seats allocated to incumbents and our logistic regression support the theory that incumbents face and
+advantage in elections over politicians currently not in office.
+
+
+### Results
+```{r, include=FALSE}
+# Install packages if needed
+# ----------------
+# Part 2
+# Drop all existing variables
+rm(list = ls())
+
+# Load Libraries
+library(RSQLite)
+library(DBI)
+library(data.table)
+library(formattable)
+library(ffbase)
+library(odbc)
+library(httr)
+library(ff)
+library(kntir)
+library(pryr)
+library(dplyr)
+library(plyr)
+library(here)
+library(rstudioapi)
+library(biglm)
+library(ETLUtils)
+library(anchors)
+library(ggplot2)
+library(knitr)
+
+
+# Automatically set working directory with the here() function
+#setwd(here())
+setwd(here())
+getwd()
+
+
+# ====================================================================================================================
+# Create CSV File
+
+# Create SUBSET CSV FILE
+# The main purpose of the read.csv.ffdf function and the ff package is to deal with large data sets.
+# Reducing the fec.csv dataset to several MBs withdraws the basic reason to use this package.
+# Reading in the entire dataset, still takes more than an hour, though. Since this is a BigData assignment, we
+# reduce the data set but keep it at a size which legitimates the purpose of the ff package.
+# see SELECTION for which columns are kept
+
+# Count rows of fec.csv, define batch size and calculate number of batches
+INPUT_FILE <- "./data/fec.csv"
+OUTPUT_FILE <- "./data/fec_Part2.csv"
+BATCHSIZE <- 1000000
+ROWS <-  length(count.fields(INPUT_FILE))
+BATCHES <- round(ROWS/BATCHSIZE)
+print(paste0("Number of batches: ", BATCHES))
+
+# Columns we keep in the new csv file
+SELECTION <- c("cycle", "transaction_type", "amount", "date", "contributor_type", "contributor_gender",
+               "contributor_state", "recipient_party", "recipient_type", "seat", "seat_held",
+               "seat_status","seat_result")
+
+# Load batch with headings and write to new CSV file individually before the loop starts
+FIRST_BATCH <- fread(INPUT_FILE, nrows = BATCHSIZE, header = TRUE)
+column_names <- colnames(FIRST_BATCH)
+FIRST_BATCH <- select(FIRST_BATCH, SELECTION)
+FIRST_BATCH
+count(FIRST_BATCH, "contributor_gender")
+fwrite(FIRST_BATCH, file = OUTPUT_FILE, append = FALSE)
+rm(FIRST_BATCH)
+gc()
+
+# Start of Loop
+# Write each Batch in the new CSV file and slice out the columns we will need for further analysis
+for (i in 2:BATCHES){
+  
+  # Calculate rows to be skipped
+  skipped = (i-1) * BATCHSIZE + 1
+  
+  # Extract BATCH with all columns and BATCHSIZE rows
+  BATCH <- fread(INPUT_FILE, nrows = BATCHSIZE, header = FALSE, skip = skipped)
+  
+  # Set column names to know which which columns shall be sliced out
+  colnames(BATCH) <- column_names
+  
+  # Extract the columns as set in SELECTION above
+  BATCH <- select(BATCH, SELECTION)
+  
+  # Write to new CSV file (Path = OUTPUT_FILE)
+  fwrite(BATCH, file = OUTPUT_FILE, append = TRUE)
+  print(paste0("Batch written: ", (i-1)))
+  
+  #Delete current batch and clean RAM
+  rm(BATCH)
+  gc()
+}
+
+print ("fec_Part2.csv was generated")
+# =====================================================================================================================
+# Create ffdf object
+
+# The new csv file has a size of approx. 1.55GB which is considerably less than the orginal one which has approx. 8GB.
+# In the following we will not use all variables. We just kept them to demonstrate the applicability of the ff package
+# and its virtual memory application.
+#Set working directory for data junks generated by the read.csv.ffdf function
+options(fftempdir = getwd())
+
+# Read the csv file with the key variable information into R using ffdf. Data junk will be saved in code folder.
+# We will read in several columns which we will drop in our further analysis again. This would not be very smart
+# in an actual analysis. However, we want to present the basic idea of the read.csv.ffdf function.
+alpha <- read.csv.ffdf(file = OUTPUT_FILE, VERBOSE = TRUE, header = TRUE, next.rows = 1500000, colClasses = NA)
+
+# Object size of freshly generated object
+object.size(alpha)
+
+# We created several batches stored in the code folder. We have thus shown the rationale of the read.csv.ffdf function and its virtual memory.
+# idea. It becomes more and more necessary the more data we have to deal with. In the following part we will drop the columns we won't need for
+# our further analysis.
+
+# Drop columns
+beta <- subset(alpha, select=c("cycle", "amount", "contributor_type", "contributor_gender", "recipient_party",
+                               "recipient_type", "seat", "seat_held", "seat_status", "seat_result"))
+
+# Investigate the data levels in each of the category below, apart from numeric/vastly many values such as cycle and amount and date
+levels(beta$contributor_type)
+levels(beta$contributor_gender)
+levels(beta$recipient_party)
+levels(beta$recipient_type)
+levels(beta$seat)
+levels(beta$seat_held)
+levels(beta$seat_status)
+levels(beta$seat_result)
+levels(beta$seat_cycle)
+levels(beta$amount)
+
+```
+
+
+
+```{r,echo=FALSE}
+
+
+
+# Analysis
+# Plot
+
+#selection of the data plot
+gammaplot_ffdf<- subset.ffdf(beta, select =c("cycle", "seat", "seat_status"), seat_status=="I")
+gammaplot_df <- as.data.frame(gammaplot_ffdf)
+gammaplot_df[,'seat'] <- gsub(":","",gammaplot_df$seat)
+gammaplot_subdf <- gammaplot_df[gammaplot_df$seat=="federalhouse",]
+
+
+countseat <- count(gammaplot_subdf, vars="cycle")
+
+
+p2<- ggplot(gammaplot_subdf,aes(x = cycle, y=seat)) + geom_point()
+p2 <- p2 +theme(plot.margin = margin(1,1,1,1,"cm"),
+              plot.title = element_text(hjust = 0.5),
+              panel.grid.minor = element_blank(), 
+              panel.grid.major = element_line(color = "gray60", size = 0.5),
+              panel.grid.major.x = element_blank(),
+              panel.background = element_blank())
+p2<-p2+ ylab("Number of Incumbent Seats")+xlab("Year") + ggtitle("Evolution of Incumbent House of Representative Seats")
+p2
+
+ggsave(ourplot, plot=p2, device="png",path= ./ourplot)
+
+#selection of data regression)
+gammareg_ffdf <- subset.ffdf(beta, select = c("amount","seat_status", "seat_result", "seat"), (seat_result=="W"|seat_result=="L"))
+gammareg_df <- as.data.frame(gammareg_ffdf)
+gammareg_df$seat_inc_dummy = ifelse(gammareg_df$seat_status== "I",1 , 0)
+gammareg_df$win = ifelse(gammareg_df$seat_result== "W",1 , 0)
+gammareg_df[,'seat'] <- gsub(":","",gammareg_df$seat)
+gammareg_subdf <- subset(gammareg_df, seat=="federalhouse")
+colnames(gammareg_subdf) <- c("amount", "seat_status", "seat_result", "seat", "win", "inc_dummy")
+
+mm<-glm(win ~ inc_dummy , data=gammareg_subdf, family=binomial(link="logit"), control=list(maxit=50))
+sumfortab<- summary(mm)
+reporttable<-as.data.frame(sumfortab$coefficients)
+
+kable(reporttable, format="markdown", big.mark=",")
+
+
+
+```
+
+
